@@ -1,0 +1,201 @@
+---
+title: "Spotify Analysis"
+author: "Ashna Mulchandani"
+format: html
+editor: visual
+editor_options: 
+  chunk_output_type: console
+---
+
+# Importing Data
+
+In this analysis, I look at data from my own Spotify account, specifically my April 2023 playlist. I used the {spotifyr} and {geniusr} packages to import data from my Spotify account, as well as song lyric data from Genius lyrics.
+
+```{r}
+library(spotifyr)
+library(geniusr)
+library(tidyverse)
+library(tidytext)
+Sys.setenv(SPOTIFY_CLIENT_ID = '82d7cf4af7524fc6a3b572f71d4c0569')
+Sys.setenv(SPOTIFY_CLIENT_SECRET = '93a8f6b37e544da8a61309e7e803adff')
+access_token = get_spotify_access_token()
+```
+
+# Monthly Playlists
+
+I first used the {spotifyr} package to get my monthly playlists from the past year.
+
+```{r}
+monthly_playlists <- get_my_playlists(
+  limit = 37,
+  authorization = get_spotify_authorization_code()
+)
+monthly_playlists <- monthly_playlists[-c(1:3, 5, 7:19)]
+```
+
+## Q1: How have the lengths of my playlists changed over time?
+
+In order to visualize how the number of tracks per playlist changed over time, I used ggplot with the name of the playlist on the x-axis and the number of songs per playlist on the y-axis. Then, in order to see which playlists had the least and greatest amount of songs, I mutated the data frame to order the playlists in increasing length and plotted it again.
+
+```{r}
+monthly_playlists |>
+  ggplot(aes(x = name, y = tracks.total)) +
+  geom_point() +
+  labs(
+    title = 'Lengths Over Time',
+    x = 'Playlist',
+    y = 'Number of Songs'
+  )
+monthly_playlists |>
+  mutate(name = reorder(name, tracks.total)) |>
+  ggplot(aes(x = name, y = tracks.total)) +
+  geom_point() +
+  labs(
+    title = 'Greatest Lengths',
+    x = 'Playlist',
+    y = 'Number of Songs'
+  )
+```
+
+From looking at the plots, I can see that the number of songs that I added per playlist varied greatly from month to month. It looks like the months that contained the least amount of songs are February 2023 and April 2023, while the playlists that contained the greatest amount of songs are March 2021 and November 2020.
+
+# April 2023 Playlist
+
+I then used the {spotifyr} package to get the tracks from my April 2023 playlist. After removing unnecessary columns, I was left with the variables added_at (the timestamp that the track was added to the playlist), track.duration_ms (the length of the track), track.explicit (whether it is explicit), track.id, and track.name, as well as track.album.id and track.album.name, that relate to the album that the track is in.
+
+```{r}
+apr_tracks <- get_playlist_tracks(
+  '0goJJFTXqPO7miT8jQXzRN',
+  authorization = get_spotify_access_token()
+)
+apr_tracks <- apr_tracks[-c(2:11, 13, 15, 17, 19:29, 31, 32, 34:42)]
+apr_tracks <- apr_tracks |>
+  add_column(
+    playlist = 'apr23',
+    .before = 1,
+  )
+```
+
+I renamed a few of the track names that included features, so that it would successfully join with the songs dataframe that I will create.
+
+```{r}
+apr_tracks[1, 6] = 'Good For Now'
+apr_tracks[6, 6] = 'Temporary'
+apr_tracks[9, 6] = 'Activate'
+apr_tracks[5, 6] = 'Everytime'
+```
+
+I then used the {geniusr} package to pull lyric data for each of the songs in my April 2023 playlist. I removed some unnecessary columns and was left with the variables song_name, artist_name, and line for each line of the song.
+
+```{r}
+df_good <- get_lyrics_search('Chiiild', 'Good For Now')
+df_good <- df_good[-c(2, 3)]
+df_fever <- get_lyrics_search('Lucky Daye', 'Fever')
+df_fever <- df_fever[-c(2, 3)]
+df_mercury <- get_lyrics_search('Steve Lacy', 'Mercury')
+df_mercury <- df_mercury[-c(2, 3)]
+df_break <- get_lyrics_search('Pyrex, Southside & 808 Mafia', 'Break Through')
+df_break <- df_break[-c(2, 3)]
+df_everytime <- get_lyrics_search('Ariana Grande', 'everytime')
+df_everytime <- df_everytime[-c(2, 3)]
+df_everytime$song_name = 'Everytime'
+df_temporary <- get_lyrics_search('6LACK', 'Temporary')
+df_temporary <- df_temporary[-c(2, 3)]
+df_mess <- get_lyrics_search('Gracie Abrams', 'Mess It Up')
+df_mess <- df_mess[-c(2, 3)]
+df_search <- get_lyrics_search('Drake', 'Search & Rescue')
+df_search <- df_search[-c(2, 3)]
+df_activate <- get_lyrics_search('Rae Sremmurd', 'Activate')
+df_activate <- df_activate[-c(2, 3)]
+df_songs <- bind_rows(list(df_good, df_fever, df_mercury, df_break, df_everytime, df_temporary, df_mess, df_search, df_activate))
+```
+
+Next, I joined my data frame containing lyric data to the data frame for the playlist.
+
+```{r}
+apr_tracks <- apr_tracks |>
+  left_join(df_songs, by = c('track.name' = 'song_name'))
+```
+
+## Q2: Which words are the most frequent in all the songs?
+
+First, I wanted to know which words were most frequent out of all the songs in the playlist. To do so, I first unnested tokens and removed the stop words from the data frame. I then, created a scatter plot that showed the frequency of the top words, with the size of each point correlating to the frequency.
+
+```{r}
+apr_tidy <- apr_tracks |>
+  unnest_tokens(word, line) |>
+  anti_join(stop_words)
+apr_tidy |>
+  count(word, sort = TRUE) |>
+  top_n(10, n)
+apr_tidy |>
+  count(word, sort = TRUE) |>
+  slice_max(n, n = 20) |>
+  ggplot(aes(x = word, y = n, size = n)) +
+  geom_point()
+```
+
+From this plot, I can see that two 'words' were significantly more frequent than the rest - 'ba' and 'ooh'. The rest hover around the same area in the plot, indicating that no other words stand out and occur several times more frequently than the others.
+
+## Q3: Which words are most unique to each song in the playlist?
+
+In order to see which words were most unique to each song in the April 2023 playlist, I arranged the words by frequency and found the tf_idf for each word.
+
+```{r}
+apr_freq <- apr_tidy |>
+  group_by(track.name) |>
+  count(word, sort = TRUE)
+apr_idf <- apr_freq |>
+  bind_tf_idf(word, track.name, n)
+apr_idf |>
+  arrange(desc(tf_idf)) |>
+  top_n(10, n)
+```
+
+I then made a bar graph to visualize the words with the highest tf_idf for each song.
+
+```{r}
+apr_idf |>
+  group_by(track.name) |>
+  filter(tf_idf == max(tf_idf)) |>
+  ggplot(aes(x = track.name, y = tf_idf, fill = word)) +
+  geom_bar(stat = 'identity') +
+  labs(
+    title = 'Words with the highest tf_idf for each song',
+    x = 'Song Name',
+    y = 'tf_idf'
+  ) +
+  theme(legend.position = 'bottom')
+```
+
+From looking at the bar graph, 'ba' has the highest tf_idf in the song Mercury, meaning it is the least likely word to be found in other songs. Other unique words include 'activate in Activate, 'fill' in Break Through, 'yuh' in Everytime, 'uh' in Fever, 'ooh' in Good For Now, 'happen' in Mess It Up, 'mami' in Search & Rescue, and 'temporary' in Temporary.
+
+# Sentiments
+
+Next, I wanted to see the sentiments of the words for each song. To do so, I first created a data frame by joining the Bing sentiments to the April 2023 data frame containing the words of the songs.
+
+```{r}
+apr_bing <- apr_tidy |>
+  inner_join(get_sentiments('bing')) |>
+  count(track.name, word, sentiment, sort = TRUE) |>
+  ungroup()
+```
+
+## Q4: Which words contribute most to the sentiment of each song?
+
+I then created a bar plot to show the words with the top contributions to sentiment for each song. The red-filled bars indicate negative sentiment while the blue-filled bars indicate positive sentiment.
+
+```{r}
+apr_bing |>
+  group_by(track.name, sentiment) |>
+  slice_max(n, n = 10) |>
+  ungroup() |>
+  mutate(word = reorder(word, n)) |>
+  ggplot(aes(n, word, fill = sentiment)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~track.name, scales = 'free_y') +
+  labs(x = 'Contribution to sentiment',
+       y = NULL)
+```
+
+From this plot, I can see that songs like Everytime and Temporary contain more words that contribute to negative sentiment than positive sentiment, while songs like Fever contain more words that contribute to positive sentiment than negative sentiment. The rest of the songs have more of an even split, with most of them leaning more towards the negative side. I can also see the top contributions to sentiment for each song, like the positive word 'love' in Good For Now and the negative word 'bad' in Activate.
